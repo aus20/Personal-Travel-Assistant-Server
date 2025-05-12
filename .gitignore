@@ -22,3 +22,33 @@
 # virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
 hs_err_pid*
 replay_pid*
+
+# Build directories
+/build/
+/out/
+
+# Gradle
+.gradle/
+/build/
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# VSCode
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment files
+.env
+
+# API keys and postgres credentials
+src/main/resources/application.yml
+
+# Firebase credentials
+src/main/resources/personal-travel-assistan-64210-firebase-adminsdk-fbsvc-d1c68c4b3f.json
