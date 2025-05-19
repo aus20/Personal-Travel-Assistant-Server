@@ -1,4 +1,5 @@
 // src/main/kotlin/com/aus20/service/MockFlightService.kt
+// Mock uçuş verisi sağlayan servis
 package com.aus20.service
 
 import com.aus20.dto.request.FlightSearchRequestDTO
@@ -10,7 +11,7 @@ import org.springframework.stereotype.Service
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import kotlin.random.Random // Rastgele veri için
-
+import com.aus20.dto.enums.FlightLegType
 @Service
 @Profile("dev") // Sadece "dev" profili aktifken bu bean kullanılır
 class MockFlightService : FlightDataProvider {
@@ -23,6 +24,7 @@ class MockFlightService : FlightDataProvider {
 
         // İstek DTO'sundaki maxPrice ve preferredAirlines'ı dikkate alabilirsiniz
         // Bu örnekte basit tutuyoruz.
+        val departureLegType = if (request.isRoundTrip) FlightLegType.DEPARTURE else FlightLegType.ONE_WAY
 
         val mockDepartureFlights = generateMockFlights(
             request.origin,
@@ -30,7 +32,8 @@ class MockFlightService : FlightDataProvider {
             request.departureDate,
             request.adults,
             request.maxPrice,
-            request.preferredAirlines
+            request.preferredAirlines,
+            departureLegType 
         )
 
         if (request.isRoundTrip && request.returnDate != null) {
@@ -40,7 +43,8 @@ class MockFlightService : FlightDataProvider {
                 request.returnDate,
                 request.adults,
                 request.maxPrice,
-                request.preferredAirlines
+                request.preferredAirlines,
+                FlightLegType.RETURN
             )
             // Gidiş-dönüş sonucunu döndür
             return RoundTripFlightResponseDTO(
@@ -73,6 +77,7 @@ class MockFlightService : FlightDataProvider {
         adults: Int,
         maxPrice: Int?,
         preferredAirlines: List<String>?,
+        legType: FlightLegType,
         count: Int = Random.nextInt(3, 8) // Rastgele 3-7 uçuş üretelim
     ): List<FlightResponseDTO> {
 
@@ -105,8 +110,9 @@ class MockFlightService : FlightDataProvider {
                     aircraftCode = listOf("738", "321", "77W", "359").random(),
                     cabinClass = listOf("ECONOMY", "BUSINESS").random(),
                     numberOfStops = stops,
-                    price = "%.2f".format(finalPrice).toDouble(), // Fiyatı 2 ondalığa yuvarla
-                    currency = currency
+                    price = finalPrice, // Fiyatı 2 ondalığa yuvarla
+                    currency = currency,
+                    leg = legType
                 )
             }
         }.sortedBy { it.price } // Fiyata göre sıralayalım

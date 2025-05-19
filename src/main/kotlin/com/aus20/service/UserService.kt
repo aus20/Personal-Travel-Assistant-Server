@@ -18,6 +18,13 @@ class UserService(
 ) {
     // Receives registration data, saves a new User to the database, returns a UserResponseDTO
     fun registerUser(dto: UserRegisterDTO): UserResponseDTO {
+        // E-postanın daha önce alınıp alınmadığını kontrol et
+        if (userRepository.findByEmail(dto.email) != null) {
+            throw IllegalArgumentException("Bu e-posta adresi zaten kayıtlı.")
+            // Veya kendi özel istisnanızı fırlatabilirsiniz:
+            // throw EmailAlreadyExistsException("Bu e-posta adresi zaten kayıtlı: ${dto.email}")
+        }
+
         val hashedPassword = passwordEncoder.encode(dto.password)
         val user = User(
             email = dto.email,
@@ -38,5 +45,19 @@ class UserService(
             return JwtLoginResponse(userDTO, token)
         }
         return null
+    }
+    /**
+     * Kullanıcının FCM token'ını temizler (log out işlemi için).
+     * @param user Log out yapan kullanıcı.
+     * @return FCM token'ı başarıyla temizlendiyse true, kullanıcı bulunamazsa false.
+     */
+    fun logoutUser(user: com.aus20.domain.User): Boolean { 
+        val existingUser = userRepository.findById(user.id).orElse(null)
+        if (existingUser != null) {
+            existingUser.fcmToken = null
+            userRepository.save(existingUser)
+            return true
+        }
+        return false
     }
 }

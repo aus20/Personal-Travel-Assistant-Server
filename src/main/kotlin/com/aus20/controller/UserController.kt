@@ -16,6 +16,9 @@ import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
+import org.springframework.http.HttpStatus
+import com.aus20.domain.User
+import com.aus20.security.CurrentUser
 
 @RestController
 @RequestMapping("/api/users")
@@ -52,6 +55,16 @@ class UserController(
         userRepository.save(user)
         return ResponseEntity.ok().build()
     }
-    
+    @PostMapping("/logout")
+    fun logout(@CurrentUser user: User): ResponseEntity<Map<String, String>> {
+        val success = userService.logoutUser(user)
+        return if (success) {
+            ResponseEntity.ok(mapOf("message" to "User logged out successfully and FCM token cleared."))
+        } else {
+            // Bu durum pek olası değil çünkü @CurrentUser kullanıcıyı bulamazsa zaten hata verir
+            // veya kimlik doğrulama filtresi engeller.
+            ResponseEntity.status(HttpStatus.NOT_FOUND).body(mapOf("message" to "User not found for logout."))
+        }
+    }
 
 }

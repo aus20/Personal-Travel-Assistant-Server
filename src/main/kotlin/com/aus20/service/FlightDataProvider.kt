@@ -1,4 +1,7 @@
 // src/main/kotlin/com/aus20/service/FlightDataProvider.kt
+// Bu arayüz, gerçek API çağrıları yapan veya mock data döndüren
+// farklı implementasyonlar arasında geçiş yapmayı kolaylaştırır.
+
 package com.aus20.service
 
 import com.aus20.dto.request.FlightSearchRequestDTO

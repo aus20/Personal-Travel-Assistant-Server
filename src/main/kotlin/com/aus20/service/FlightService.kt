@@ -11,120 +11,18 @@ import com.aus20.dto.response.RoundTripFlightResponseDTO
 import com.aus20.dto.response.FlightResponseDTO
 import org.springframework.web.client.HttpClientErrorException
 import org.springframework.context.annotation.Profile // Profile import'u
+import com.aus20.dto.enums.FlightLegType
+import org.slf4j.LoggerFactory
 
 @Service
-@Profile("!dev")
+@Profile("!dev")  // Bu profildeki bean'ler sadece "dev" profili aktif değilse kullanılır.
 class FlightService(
     private val authService: AmadeusAuthService,
     private val restTemplate: RestTemplate
 ) : FlightDataProvider {
-    // searchflights may take more than 2 variables such as departureDate, adults, children, infants, etc.
-    // this will change in the future
-    fun searchFlights(origin: String, destination: String): List<Flight> {
-        val token = authService.getAccessToken()
-        val headers = HttpHeaders().apply {
-            contentType = MediaType.APPLICATION_JSON
-            setBearerAuth(token)
-        }
+    private val logger = LoggerFactory.getLogger(FlightService::class.java)
 
-        val url = "https://test.api.amadeus.com/v2/shopping/flight-offers" +
-                "?originLocationCode=$origin&destinationLocationCode=$destination" +
-                "&departureDate=2025-05-05&adults=1"
-
-        val response = restTemplate.exchange(
-            url,
-            HttpMethod.GET,
-            HttpEntity<String>(headers),
-            Map::class.java
-        )
-
-        
-
-
-        val data = response.body?.get("data") as? List<*> ?: return emptyList()
-
-        return data.mapNotNull { offerRaw ->
-            val offer = offerRaw as? Map<String, Any>
-            if (offer == null) {
-                println("Offer is not a map: $offerRaw")
-                return@mapNotNull null
-            }
-
-            try {
-                val itineraries = (offer["itineraries"] as? List<*>)?.filterIsInstance<Map<String, Any>>()
-                if (itineraries.isNullOrEmpty()) {
-                    println("Missing or empty itineraries")
-                    return@mapNotNull null
-                }
-    
-                val firstItinerary = itineraries.first()
-                val segments = (firstItinerary["segments"] as? List<*>)?.filterIsInstance<Map<String, Any>>()
-                if (segments.isNullOrEmpty()) {
-                    println("Missing or empty segments")
-                    return@mapNotNull null
-                }
-    
-                val firstSegment = segments.first()
-    
-                val departure = (firstSegment["departure"] as? Map<String, Any>) ?: return@mapNotNull null
-                val arrival = (firstSegment["arrival"] as? Map<String, Any>) ?: return@mapNotNull null
-    
-                val departureTimeRaw = departure["at"] as? String ?: return@mapNotNull null
-                val arrivalTimeRaw = arrival["at"] as? String ?: return@mapNotNull null
-    
-                val formatter = DateTimeFormatter.ISO_DATE_TIME
-                val departureTime = try {
-                    LocalDateTime.parse(departureTimeRaw, formatter)
-                } catch (e: Exception) {
-                    println("Failed to parse departure time: $departureTimeRaw")
-                    return@mapNotNull null
-                }
-    
-                val arrivalTime = try {
-                    LocalDateTime.parse(arrivalTimeRaw, formatter)
-                } catch (e: Exception) {
-                    println("Failed to parse arrival time: $arrivalTimeRaw")
-                    return@mapNotNull null
-                }
-    
-                val carrierCode = firstSegment["carrierCode"] as? String ?: "??"
-                val flightNumber = firstSegment["number"] as? String ?: "??"
-                val aircraftCode = (firstSegment["aircraft"] as? Map<*, *>)?.get("code") as? String ?: "N/A"
-                
-                val duration = firstItinerary["duration"] as? String ?: "N/A"
-                val numberOfStops = segments.size - 1
-
-                val priceBlock = offer["price"] as? Map<*, *> ?: return@mapNotNull null
-                val price = (priceBlock["total"] as? String)?.toDoubleOrNull() ?: 0.0
-                val currency = priceBlock["currency"] as? String ?: "USD"
-                
-                val travelerPricings = offer["travelerPricings"] as? List<*> ?: return@mapNotNull null
-                val firstTraveler = travelerPricings.firstOrNull() as? Map<*, *> ?: return@mapNotNull null
-                val fareDetails = firstTraveler["fareDetailsBySegment"] as? List<*> ?: return@mapNotNull null
-                val firstFare = fareDetails.firstOrNull() as? Map<*, *> ?: return@mapNotNull null
-                val cabinClass = firstFare["cabin"] as? String ?: "Unknown"
-
-                Flight(
-                    origin = origin,
-                    destination = destination,
-                    departureTime = departureTime,
-                    arrivalTime = arrivalTime,
-                    carrierCode = carrierCode,
-                    flightNumber = flightNumber,
-                    duration = duration,
-                    aircraftCode = aircraftCode,
-                    cabinClass = cabinClass,
-                    numberOfStops = numberOfStops,
-                    price = price,
-                    currency = currency
-                )
-            } catch (e: Exception) {
-                println("Mapping failed for offer: ${offer["id"] ?: "unknown"} -> ${e.message}")
-                e.printStackTrace()
-                null
-            }
-        }
-    }
+    // MockFlightService'deki getRawFlightResponse'ın aynısı
     override fun getRawFlightResponse(origin: String, destination: String): Any? {
         val token = authService.getAccessToken()
         val headers = HttpHeaders().apply {
@@ -144,11 +42,18 @@ class FlightService(
         return response.body
     }
 
+    // MockFlightService'deki searchFlightsWithFilters'ın aynısı
     override fun searchFlightsWithFilters(request: FlightSearchRequestDTO): Any {
         val token = authService.getAccessToken()
         val headers = HttpHeaders().apply {
             contentType = MediaType.APPLICATION_JSON
             setBearerAuth(token)
+        }
+        // Gidiş ayağı için legType belirle (tek yön ise ONE_WAY, gidiş-dönüş ise DEPARTURE)
+        val departureLegType = if (request.isRoundTrip && request.returnDate != null) {
+            FlightLegType.DEPARTURE
+        } else {
+            FlightLegType.ONE_WAY
         }
 
         val departureFlights = fetchFlights(
@@ -158,7 +63,8 @@ class FlightService(
             adults = request.adults,
             preferredAirlines = request.preferredAirlines,
             maxPrice = request.maxPrice,
-            headers = headers
+            headers = headers,
+            legType = departureLegType
         )
 
         if (request.isRoundTrip && request.returnDate != null) {
@@ -169,7 +75,8 @@ class FlightService(
                 adults = request.adults,
                 preferredAirlines = request.preferredAirlines,
                 maxPrice = request.maxPrice,
-                headers = headers
+                headers = headers,
+                legType = FlightLegType.RETURN
             )
             return RoundTripFlightResponseDTO(
                 departureFlight = departureFlights,
@@ -187,7 +94,8 @@ class FlightService(
         adults: Int,
         preferredAirlines: List<String>?,
         maxPrice: Int?,
-        headers: HttpHeaders
+        headers: HttpHeaders,
+        legType: FlightLegType
     ): List<FlightResponseDTO> {
         val baseUrl = "https://test.api.amadeus.com/v2/shopping/flight-offers"
         val urlBuilder = StringBuilder("$baseUrl?originLocationCode=$origin&destinationLocationCode=$destination&departureDate=$date&adults=$adults")
@@ -209,10 +117,10 @@ class FlightService(
                 Map::class.java
             )
         } catch (e: HttpClientErrorException.TooManyRequests) {
-            println("🔁 Too many requests: ${e.statusCode} - ${e.responseBodyAsString}")
+            logger.warn("🔁 Too many requests: ${e.statusCode} - ${e.responseBodyAsString}") //looger.warn
             return emptyList() // or throw a custom exception, or add retry logic
         } catch (e: HttpClientErrorException) {
-            println("❌ API error: ${e.statusCode} - ${e.responseBodyAsString}")
+            logger.error("❌ API error: ${e.statusCode} - ${e.responseBodyAsString}") //logger.error
             return emptyList()
         }
 
@@ -266,7 +174,8 @@ class FlightService(
                     cabinClass = cabinClass,
                     numberOfStops = numberOfStops,
                     price = price,
-                    currency = currency
+                    currency = currency,
+                    leg = legType
                 )
             } catch (e: Exception) {
                 println("Mapping failed for offer: ${offer["id"] ?: "unknown"} -> ${e.message}")

@@ -32,5 +32,13 @@ data class UserFlightSearch(
     var flights: MutableList<Flight> = mutableListOf(),
 
     @Column(nullable = false)
-    var createdAt: LocalDateTime = LocalDateTime.now()
+    var createdAt: LocalDateTime = LocalDateTime.now(),
+
+    @Column(nullable = false)
+    var adults: Int = 1,
+
+    @Column(nullable = true)
+    var preferredAirlines: String? = null,
+
+    var isRoundTrip: Boolean? = null
 )

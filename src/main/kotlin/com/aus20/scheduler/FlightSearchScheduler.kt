@@ -9,7 +9,9 @@ class FlightSearchScheduler(
     private val userFlightSearchService: UserFlightSearchService
 ) {
 
-    @Scheduled(cron = "0 0 0 * * ?") // Executes every day at midnight
+    //@Scheduled(cron = "0 0 0 * * ?") // Executes every day at midnight
+    //@Scheduled(cron = "0 */10 * * * ?") // Her 10 dakikada bir çalışır
+    @Scheduled(cron = "0/30 * * * * ?") // Her 30 saniyede bir çalışır
     fun performScheduledSearches() {
         println("✅ Starting scheduled flight search execution...")
         userFlightSearchService.executePeriodicSearches()
