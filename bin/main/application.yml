@@ -1,0 +1,37 @@
+server:
+  port: 8080  # default port (you can change if you want)
+
+spring:
+  profiles:
+    active: dev
+  datasource:
+    url: jdbc:postgresql://localhost:5432/personal_travel_assistant
+    username: travel_user   # 🔥 CHANGE this to your local Postgres username
+    password: travel_pass   # 🔥 CHANGE this to your local Postgres password
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update   # Automatically create/update tables based on your Entity classes
+    show-sql: true       # Log all SQL queries in console (good for debugging)
+    properties:
+      hibernate:
+        format_sql: true # Format the SQL output nicely
+
+  # Optional: if you have database connection problems, you can tune this later
+  # datasource:
+  #   hikari:
+  #     maximum-pool-size: 10
+logging:
+  level:
+    org.springframework: INFO
+    org.hibernate.SQL: DEBUG     # Shows SQL queries in the log
+    org.hibernate.type.descriptor.sql.BasicBinder: TRACE  # Shows binding parameters
+
+amadeus:
+  api-key: ScxM0u2hFIkSjmBYFmeNVQZVkMAGGieV  # 🔥 CHANGE this to your real Amadeus API key
+  api-secret: VNjOHKfISUWdX0Mv  # 🔥 CHANGE this to your real Amadeus API secret
+
+jwt:
+  secret: huQkYOyYbEqXsVTSPvm6pr5szh3tT9lc8EE81sYwEKQ=  # changed from the default
+  expiration: 604800000  # 1 week in milliseconds
