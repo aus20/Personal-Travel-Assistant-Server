@@ -5,6 +5,7 @@
 package com.aus20.service
 
 import com.aus20.dto.request.FlightSearchRequestDTO
+import com.aus20.dto.response.FlightResponseDTO
 
 /**
  * Uçuş verisi sağlayan servisler için ortak arayüz.
@@ -14,12 +15,11 @@ import com.aus20.dto.request.FlightSearchRequestDTO
 interface FlightDataProvider {
 
     /**
-     * Verilen kriterlere göre uçuşları arar.
-     * Sonuç, tek yönlü ise List<FlightResponseDTO>,
-     * gidiş-dönüş ise RoundTripFlightResponseDTO olabilir.
-     * Bu nedenle Any tipini kullanıyoruz (veya daha spesifik bir sealed class/interface olabilir).
+     * Uçuş arama isteklerini alır ve filtrelere göre uçuşları döndürür.
+     * @param request DTO içindeki filtreler ve arama kriterleri kullanılarak uçuşlar aranır.
+     * @return Filtrelere göre bulunan uçuşların listesi.
      */
-    fun searchFlightsWithFilters(request: FlightSearchRequestDTO): Any
+    fun searchFlightsWithFilters(request: FlightSearchRequestDTO): List<FlightResponseDTO>
 
     /**
      * Basit arama için ham (raw) API yanıtını döndürür.

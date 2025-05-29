@@ -6,6 +6,9 @@ import com.aus20.dto.enums.FlightLegType
 data class FlightResponseDTO(
     val origin: String,
     val destination: String,
+    val originAirportCode: String, // YENİ: Havaalanı kodu (örn: "IST")
+    val destinationAirportCode: String, // YENİ: Havaalanı kodu (örn: "LHR")
+    val layoverAirports: List<String>, // Sadece IATA kodları (örn: ["MUC"])
     val departureTime: String,
     val arrivalTime: String,
     val carrier: String, // e.g., "TK 1234"

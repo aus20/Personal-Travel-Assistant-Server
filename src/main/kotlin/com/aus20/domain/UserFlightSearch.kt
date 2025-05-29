@@ -40,5 +40,5 @@ data class UserFlightSearch(
     @Column(nullable = true)
     var preferredAirlines: String? = null,
 
-    var isRoundTrip: Boolean? = null
+    //var isRoundTrip: Boolean? = null
 )

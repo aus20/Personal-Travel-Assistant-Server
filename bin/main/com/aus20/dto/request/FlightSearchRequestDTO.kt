@@ -22,8 +22,6 @@ data class FlightSearchRequestDTO(
     )
     val returnDate: String? = null,
 
-    val isRoundTrip: Boolean = false,
-
     @DecimalMin(value = "0.0", inclusive = false, message = "Max price must be greater than 0")
     val maxPrice: Int? = null,
 

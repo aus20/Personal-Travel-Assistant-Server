@@ -10,21 +10,23 @@ import org.springframework.web.bind.annotation.*
 import org.springframework.security.core.annotation.AuthenticationPrincipal
 import com.aus20.dto.response.SavedUserSearchResponseDTO
 import com.aus20.dto.response.UserSearchDetailDTO
+import com.aus20.dto.response.SimpleSavedSearchResponseDTO
 
 @RestController
 @RequestMapping("/api/user-searches")
 class UserFlightSearchController(
     private val userFlightSearchService: UserFlightSearchService
 ) {
-
+    /*  
     @PostMapping
     fun saveUserSearch(
         @RequestBody request: FlightSearchRequestDTO,
         @CurrentUser user: User
-    ): ResponseEntity<SavedUserSearchResponseDTO> { // <<<--- DÖNÜŞ TİPİ DEĞİŞTİ
+    ): ResponseEntity<SimpleSavedSearchResponseDTO> { // <<<--- DÖNÜŞ TİPİ DEĞİŞTİ
         val savedSearchDetails = userFlightSearchService.saveSearchWithTopFlights(request, user)
         return ResponseEntity.ok(savedSearchDetails) // Direkt servisten gelen DTO'yu döndür
     }
+    */
 
     @GetMapping
     fun getUserSearches(
@@ -33,7 +35,7 @@ class UserFlightSearchController(
         val searches = userFlightSearchService.getUserSearches(user)
         return ResponseEntity.ok(searches) // Servisten gelen DTO listesini direkt döndür
     }
-
+    /* 
     @PutMapping("/{searchId}")
     fun updateFlightSearch(
         @PathVariable searchId: Long,
@@ -43,7 +45,7 @@ class UserFlightSearchController(
         val updatedSearch = userFlightSearchService.updateUserSearch(searchId, dto, user)
         return ResponseEntity.ok(updatedSearch)
     }
-
+    */
     @DeleteMapping("/{searchId}")
     fun deleteFlightSearch(
         @PathVariable searchId: Long,

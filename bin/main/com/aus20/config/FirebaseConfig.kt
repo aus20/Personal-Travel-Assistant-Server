@@ -12,7 +12,7 @@ class FirebaseConfig {
 
     @PostConstruct
     fun initFirebase() {
-        val serviceAccount = FileInputStream("src/main/resources/personal-travel-assistan-3998e-firebase-adminsdk-fbsvc-74130d6422.json")
+        val serviceAccount = FileInputStream("src/main/resources/personal-travel-assistan-c2192-firebase-adminsdk-fbsvc-8c7c11f8a0.json")
 
         val options = FirebaseOptions.builder()
             .setCredentials(GoogleCredentials.fromStream(serviceAccount))

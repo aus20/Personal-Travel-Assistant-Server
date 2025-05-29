@@ -21,4 +21,12 @@ interface UserFlightSearchRepository : JpaRepository<UserFlightSearch, Long> {
 
     @Query("SELECT DISTINCT ufs FROM UserFlightSearch ufs LEFT JOIN FETCH ufs.user LEFT JOIN FETCH ufs.flights")
     fun findAllWithUserAndFlights(): List<UserFlightSearch>
+
+    fun findByUserAndOriginAndDestinationAndDepartureDateAndReturnDate(
+        user: User,
+        origin: String,
+        destination: String,
+        departureDate: LocalDate,
+        returnDate: LocalDate?
+    ): UserFlightSearch?
 }

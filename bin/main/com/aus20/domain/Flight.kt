@@ -25,6 +25,15 @@ data class Flight(
     val destination: String,
 
     @Column(nullable = false)
+    val originAirportCode: String,
+
+    @Column(nullable = false)
+    val destinationAirportCode: String,
+
+    @Column(nullable = true) // <<<--- YENİ: Aktarmalar için, nullable olabilir.
+    val layoverAirports: String?, // Örn: "MUC,FRA" veya null
+
+    @Column(nullable = false)
     val departureTime: LocalDateTime,
 
     @Column(nullable = false)
