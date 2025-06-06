@@ -34,6 +34,16 @@ class FlightService(
         if (dateString.isNullOrBlank()) {
             return null
         }
+        // 1. Adım: Zaten "yyyy-MM-dd" formatında mı diye kontrol et
+        try {
+            LocalDate.parse(dateString, amadeusDateFormatter) // Sadece parse etmeyi dene
+            // Eğer buraya kadar hata almadan geldiyse, format zaten doğru demektir.
+            // logger.debug("Date '$dateString' is already in yyyy-MM-dd format.")
+            return dateString // Olduğu gibi döndür
+        } catch (e: DateTimeParseException) {
+            // Format "yyyy-MM-dd" değil, diğer formatı denemeye devam et.
+            // logger.debug("Date '$dateString' is not in yyyy-MM-dd format, trying 'MMM d, uuuu'.")
+        }
         return try {
             val parsedDate = LocalDate.parse(dateString, inputDateFormatter)
             parsedDate.format(amadeusDateFormatter)

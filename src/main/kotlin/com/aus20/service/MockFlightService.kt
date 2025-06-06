@@ -15,6 +15,7 @@ import com.aus20.dto.enums.FlightLegType
 import java.util.Locale
 import java.time.LocalDate
 import java.time.format.DateTimeParseException
+import java.time.Duration
 
 @Service
 @Profile("dev") // Sadece "dev" profili aktifken bu bean kullanılır
@@ -174,8 +175,8 @@ class MockFlightService : FlightDataProvider {
                 val arrivalTime = departureTime.plusHours(durationHours.toLong()).plusMinutes(durationMinutes.toLong())
 
                 // Sahte havaalanı kodları oluştur (Şehrin ilk 3 harfi + M/K)
-                val mockOriginAirport = origin.take(3).uppercase() + "M"
-                val mockDestinationAirport = destination.take(3).uppercase() + "K"
+                val mockOriginAirport = origin.take(3).uppercase()
+                val mockDestinationAirport = destination.take(3).uppercase()
 
                 // <<<--- YENİ: Sahte aktarma listesi oluştur ---<<<
                 val layovers = if (stops > 0) {
@@ -185,7 +186,9 @@ class MockFlightService : FlightDataProvider {
                 } else {
                     emptyList<String>()
                 }
+                
                 // <<<--- BİTTİ ---<<<
+                val durationIso = "PT${durationHours}H${durationMinutes}M"
 
                 FlightResponseDTO(
                     origin = origin,
@@ -196,7 +199,7 @@ class MockFlightService : FlightDataProvider {
                     departureTime = departureTime.format(formatter),
                     arrivalTime = arrivalTime.format(formatter),
                     carrier = "$airline ${Random.nextInt(100, 9999)}",
-                    duration = "${durationHours}H${durationMinutes}M",
+                    duration = formatDuration(durationIso),
                     aircraftCode = listOf("738", "321", "77W", "359").random(),
                     cabinClass = listOf("ECONOMY", "BUSINESS").random(),
                     numberOfStops = stops,
@@ -206,5 +209,35 @@ class MockFlightService : FlightDataProvider {
                 )
             }
         }.sortedBy { it.price } // Fiyata göre sıralayalım
+    }
+
+    private fun formatDuration(isoDuration: String?): String {
+        if (isoDuration.isNullOrBlank() || isoDuration == "PT") {
+            return "N/A" // Geçersiz veya boş süreler için "N/A" dön
+        }
+
+        return try {
+            val duration = Duration.parse(isoDuration)
+            val hours = duration.toHours()
+            val minutes = duration.toMinutes() % 60 // Saatten arta kalan dakikalar
+
+            val parts = mutableListOf<String>()
+            if (hours > 0) {
+                parts.add("$hours ${if (hours == 1L) "hour" else "hours"}")
+            }
+            if (minutes > 0) {
+                parts.add("$minutes ${if (minutes == 1L) "minute" else "minutes"}")
+            }
+
+            // Eğer süre 0 ise "0 minutes" dön, aksi halde birleştir.
+            if (parts.isEmpty()) "0 minutes" else parts.joinToString(" ")
+
+        } catch (e: DateTimeParseException) {
+            // logger.warn("Süre ('$isoDuration') ayrıştırılamadı. Olduğu gibi döndürülüyor.", e)
+            isoDuration // Eğer parse edilemezse, orijinal string'i dön (fallback)
+        } catch (e: Exception) {
+            // logger.error("Süre ('$isoDuration') işlenirken beklenmedik hata.", e)
+            isoDuration // Diğer hatalarda da orijinal string'i dön
+        }
     }
 }

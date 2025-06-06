@@ -25,6 +25,8 @@ import java.time.Duration
 import com.aus20.dto.response.SimpleSavedSearchResponseDTO
 // import Locale
 import java.util.Locale
+// parseDateString için
+import com.aus20.service.FlightService
 
 @Service
 class UserFlightSearchService(
@@ -312,7 +314,7 @@ class UserFlightSearchService(
 
         println("Flight search with ID $searchId successfully deleted.")
     }
-
+    /*
     @Transactional
     fun executePeriodicSearches() {
         val allSearches = userFlightSearchRepository.findAllWithUserAndFlights()
@@ -401,6 +403,7 @@ class UserFlightSearchService(
                     try {
                         notificationService.sendNotification(
                             token = fcmToken,
+                            //Aynı
                             title = "${search.origin}-${search.destination} Uçuş Fiyat Değişikliği", // Daha genel bir başlık
                             body = fullNotificationBody
                         )
@@ -418,11 +421,190 @@ class UserFlightSearchService(
             }
         } // for döngüsü sonu
     }
+    */
+    // YENİ EXECUTE PERIODİC SEARCH METODU
+    /* */
+    @Transactional
+    fun executePeriodicSearches() {
+        // User ve flights bilgilerini fetch ederek tüm kayıtlı aramaları al
+        val allUserSearches = userFlightSearchRepository.findAllWithUserAndFlights() //
+        logger.info("Executing periodic searches for ${allUserSearches.size} user searches.")
 
+        for (savedSearch in allUserSearches) {
+            logger.debug("Processing UserSearch ID: ${savedSearch.id} for User ID: ${savedSearch.user.id}")
+
+            // 1. Mevcut kaydedilmiş uçuşu al (UserFlightSearch başına 1 tane olmalı veya en ucuzu)
+            //    Eğer saveSearchAndInitialFlight sadece 1 uçuş kaydediyorsa, firstOrNull() yeterli.
+            //    Eğer birden fazla olabiliyorsa ve en ucuzunu karşılaştırmak istiyorsak minByOrNull.
+            //    Şimdilik, en son kaydedilen/güncellenen tek uçuş olduğunu varsayarak firstOrNull() kullanalım
+            //    veya daha güvenli olması için minByOrNull { it.price }
+            val oldFlightEntity: Flight? = savedSearch.flights.minByOrNull { it.price } //
+
+            // 2. Kaydedilmiş arama kriterleriyle yeni bir API isteği oluştur
+            val requestDto = FlightSearchRequestDTO( //
+                origin = savedSearch.origin,
+                destination = savedSearch.destination,
+                departureDate = savedSearch.departureDate.format(dateFormatter), // dateFormatter "YYYY-MM-DD" olmalı
+                returnDate = savedSearch.returnDate?.format(dateFormatter),
+                adults = savedSearch.adults,
+                maxPrice = savedSearch.maxPrice,
+                preferredAirlines = savedSearch.preferredAirlines?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
+            )
+
+            // 3. FlightDataProvider'ı kullanarak yeni uçuşları ara
+            //    Bu metot artık her zaman List<FlightResponseDTO> döner ve bu liste
+            //    FlightService/MockService içinde zaten TOTAL_FLIGHTS_TO_DISPLAY ile limitlenmiştir.
+            val newFlightOffers: List<FlightResponseDTO> = flightDataProvider.searchFlightsWithFilters(requestDto) //
+
+            var dbUpdated = false
+            var priceChangedSignificantly = false
+            val notificationMessages = mutableListOf<String>() // Her bacak için ayrı mesaj olabilir
+
+
+            if (newFlightOffers.isEmpty()) {
+                logger.info("No new flights found from provider for UserSearch ID: ${savedSearch.id}. Skipping.")
+                // Opsiyonel: Kullanıcıya "Aradığınız uçuş artık bulunamıyor" bildirimi eklenebilir.
+                // Eğer oldFlightEntity null değilse ve newFlightOffers boşsa bu durum oluşur.
+                if (oldFlightEntity != null) {
+                    // TODO: "Uçuş artık mevcut değil" bildirimi için mantık eklenebilir.
+                    // Şimdilik, eski uçuşu silip kullanıcıya bilgi verebiliriz veya sadece loglayabiliriz.
+                    // Örneğin:
+                    // savedSearch.flights.clear()
+                    // userFlightSearchRepository.save(savedSearch)
+                    // notificationService.sendNotification(savedSearch.user.fcmToken, "Uçuş Bulunamadı", "${savedSearch.origin}-${savedSearch.destination} için takip ettiğiniz uçuş artık mevcut değil.")
+                }
+                continue // Bir sonraki kayıtlı aramaya geç
+            }
+
+            // 4. Yeni sonuçlardan en ucuz olanını veya ilgili bacakların en ucuzlarını bul
+            //    FlightResponseDTO içinde 'leg' alanı olduğu için bunu kullanabiliriz.
+            var newCheapestOverallDto: FlightResponseDTO? = null
+            var newCheapestDepartureDto: FlightResponseDTO? = null
+            var newCheapestReturnDto: FlightResponseDTO? = null
+
+            if (savedSearch.returnDate != null) { // Gidiş-Dönüş aramasıydı
+                newCheapestDepartureDto = newFlightOffers.filter { it.leg == FlightLegType.DEPARTURE }.minByOrNull { it.price } //
+                newCheapestReturnDto = newFlightOffers.filter { it.leg == FlightLegType.RETURN }.minByOrNull { it.price } //
+                // Genel bir karşılaştırma için en ucuz olanı veya her ikisini birden değerlendirebiliriz.
+                // Şimdilik, bildirim için her bacağı ayrı ele alacağız.
+            } else { // Tek Yön aramasıydı
+                newCheapestOverallDto = newFlightOffers.filter { it.leg == FlightLegType.ONE_WAY }.minByOrNull { it.price } //
+            }
+            
+            // Eğer gidiş-dönüş ise ve bacaklardan biri için yeni uçuş bulunamazsa, bu bir sorun olabilir.
+            // Şimdilik, en az bir yeni en ucuz uçuş varsa devam edelim.
+            if (newCheapestOverallDto == null && newCheapestDepartureDto == null && newCheapestReturnDto == null) {
+                logger.info("Could not determine any relevant cheapest flight from new offers for UserSearch ID: ${savedSearch.id}. Skipping.")
+                continue
+            }
+            
+            // ---- Tek Yön veya Gidiş Ayağı Karşılaştırması ----
+            val targetNewFlightForDepartureOrOneWay = newCheapestDepartureDto ?: newCheapestOverallDto
+            val oldFlightForDepartureOrOneWay = if (savedSearch.returnDate != null) {
+                savedSearch.flights.filter { it.departureTime.toLocalDate() == savedSearch.departureDate && it.origin == savedSearch.origin }.minByOrNull { it.price }
+            } else {
+                oldFlightEntity // Tek yönse direkt eski kayıtlıyı al
+            }
+
+            if (targetNewFlightForDepartureOrOneWay != null) {
+                if (oldFlightForDepartureOrOneWay == null) {
+                    // Daha önce bu bacak için kayıtlı uçuş yoktu, şimdi bulundu.
+                    val newFlightEntity = mapFlightDtoToEntity(targetNewFlightForDepartureOrOneWay, savedSearch)
+                    if (savedSearch.returnDate == null) savedSearch.flights.clear() // Tek yönse eskisini temizle
+                    savedSearch.flights.removeIf { it.departureTime.toLocalDate() == savedSearch.departureDate && it.origin == savedSearch.origin && it.destination == savedSearch.destination } // Gidiş ayağını temizle
+                    savedSearch.flights.add(newFlightEntity)
+                    dbUpdated = true
+                    notificationMessages.add("Your flight search from ${savedSearch.origin} to ${savedSearch.destination} on ${savedSearch.departureDate.format(dateFormatter)} is found. The cheapest price is ${targetNewFlightForDepartureOrOneWay.price} ${targetNewFlightForDepartureOrOneWay.currency}.")
+                    priceChangedSignificantly = true
+                } else {
+                    val oldPrice = oldFlightForDepartureOrOneWay.price
+                    val newPrice = targetNewFlightForDepartureOrOneWay.price
+                    if (newPrice < oldPrice) {
+                        notificationMessages.add("Price dropped for your departure flight on ${savedSearch.departureDate.format(dateFormatter)} from ${savedSearch.origin} to ${savedSearch.destination}. Price change: $oldPrice -> $newPrice ${targetNewFlightForDepartureOrOneWay.currency}.")
+                        priceChangedSignificantly = true
+                    } else if (newPrice > oldPrice) {
+                        notificationMessages.add("Price increased for your departure flight on ${savedSearch.departureDate.format(dateFormatter)} from ${savedSearch.origin} to ${savedSearch.destination}. Price change: $oldPrice -> $newPrice ${targetNewFlightForDepartureOrOneWay.currency}.")
+                        priceChangedSignificantly = true
+                    }
+                    else {
+                        // <<<--- YENİ: Fiyat değişmese bile test için bildirim oluştur ---<<<
+                        notificationMessages.add("Notification on flight ${savedSearch.origin} to ${savedSearch.destination} on ${savedSearch.departureDate.format(dateFormatter)}. The price is same: $newPrice ${targetNewFlightForDepartureOrOneWay.currency}.")
+                        logger.info("Price unchanged for UserSearch ID: ${savedSearch.id}. Price: $newPrice.")
+                    }
+                    // Fiyat değiştiyse veya her zaman en güncel en ucuzu kaydetmek istiyorsak
+                    if (newPrice != oldPrice) { // Sadece fiyat değiştiyse güncelle
+                        val updatedFlightEntity = mapFlightDtoToEntity(targetNewFlightForDepartureOrOneWay, savedSearch)
+                        savedSearch.flights.remove(oldFlightForDepartureOrOneWay)
+                        savedSearch.flights.add(updatedFlightEntity)
+                        dbUpdated = true
+                    }
+                }
+            }
+
+            // ---- Dönüş Ayağı Karşılaştırması (Eğer Gidiş-Dönüş ise) ----
+            if (savedSearch.returnDate != null && newCheapestReturnDto != null) {
+                val oldFlightForReturn = savedSearch.flights.filter { it.departureTime.toLocalDate() == savedSearch.returnDate && it.origin == savedSearch.destination }.minByOrNull { it.price }
+                if (oldFlightForReturn == null) {
+                    val newFlightEntity = mapFlightDtoToEntity(newCheapestReturnDto, savedSearch)
+                    savedSearch.flights.removeIf { it.departureTime.toLocalDate() == savedSearch.returnDate && it.origin == savedSearch.destination && it.destination == savedSearch.origin } // Dönüş ayağını temizle
+                    savedSearch.flights.add(newFlightEntity)
+                    dbUpdated = true
+                    notificationMessages.add(" ${savedSearch.returnDate?.format(dateFormatter)} ${savedSearch.destination}-${savedSearch.origin}. ${newCheapestReturnDto.price} ${newCheapestReturnDto.currency}.")
+                    priceChangedSignificantly = true // Ayrı bir bacak olduğu için bu da önemli
+                } else {
+                    val oldPrice = oldFlightForReturn.price
+                    val newPrice = newCheapestReturnDto.price
+                    if (newPrice < oldPrice) {
+                        notificationMessages.add("Price dropped for your return flight on ${savedSearch.returnDate?.format(dateFormatter)} from ${savedSearch.destination} to ${savedSearch.origin}. Price change: $oldPrice -> $newPrice ${newCheapestReturnDto.currency}.")
+                        priceChangedSignificantly = true
+                    } else if (newPrice > oldPrice) {
+                        notificationMessages.add("Price increased for your return flight on ${savedSearch.returnDate?.format(dateFormatter)} from ${savedSearch.destination} to ${savedSearch.origin} Price change: $oldPrice -> $newPrice ${newCheapestReturnDto.currency}.")
+                        priceChangedSignificantly = true
+                    }
+                    if (newPrice != oldPrice) {
+                        val updatedFlightEntity = mapFlightDtoToEntity(newCheapestReturnDto, savedSearch)
+                        savedSearch.flights.remove(oldFlightForReturn)
+                        savedSearch.flights.add(updatedFlightEntity)
+                        dbUpdated = true
+                    }
+                }
+            }
+
+            if (dbUpdated) {
+                userFlightSearchRepository.save(savedSearch) // Tüm değişiklikleri kaydet
+                logger.info("Flight details updated for UserSearch ID: ${savedSearch.id}")
+            }
+
+            // 5. Bildirim Gönder
+            if (notificationMessages.isNotEmpty()) {
+                val fullNotificationBody = notificationMessages.joinToString(" ")
+                val fcmToken = savedSearch.user.fcmToken
+                if (!fcmToken.isNullOrBlank()) {
+                    try {
+                        notificationService.sendNotification( //
+                            token = fcmToken,
+                            title = "Flight Search Notification",
+                            body = fullNotificationBody
+                        )
+                        logger.info("Notification sent for UserSearch ID: ${savedSearch.id}. Message: $fullNotificationBody")
+                    } catch (e: Exception) {
+                        logger.error("Failed to send notification for UserSearch ID: ${savedSearch.id}", e)
+                    }
+                } else {
+                    logger.info("Price changed for UserSearch ID: ${savedSearch.id}, but no FCM token for user ${savedSearch.user.id}.")
+                }
+            } else if (dbUpdated) {
+                logger.info("DB updated for UserSearch ID: ${savedSearch.id}, but no significant price change for notification.")
+            } else {
+                logger.info("No DB update or significant price change for UserSearch ID: ${savedSearch.id}.")
+            }
+        } // for döngüsü sonu
+    }
     /**
      * Kullanıcının arama kriterlerini ve bulunan en ucuz uçuşu (eğer varsa) kaydeder.
      * Eğer aynı arama kriterleri daha önce kaydedilmişse işlem yapmaz (veya mevcutu döner).
      */
+    /* 
     @Transactional
     fun saveSearchAndInitialFlight(
         dto: FlightSearchRequestDTO,
@@ -494,6 +676,164 @@ class UserFlightSearchService(
             logger.info("No flights in the fetched results to save for new search ID ${savedSearchBase.id}")
         }
         return savedSearchBase // Uçuş eklenmemiş olsa bile kaydedilmiş arama kriterlerini dön
+    }
+    */
+    @Transactional
+    fun saveSearchAndInitialFlight(
+        dto: FlightSearchRequestDTO, //
+        user: User,
+        fetchedFlights: List<FlightResponseDTO> //
+    ): SimpleSavedSearchResponseDTO { // <<<--- DÖNÜŞ TİPİ BUDUR
+
+        logger.info("---- saveSearchAndInitialFlight received fetchedFlights (Size: ${fetchedFlights.size}) ----")
+        fetchedFlights.take(5).forEachIndexed { index, flight -> // İlk 5'ini logla
+            logger.info("Received Flight ${index + 1}: Origin=${flight.origin}, Dest=${flight.destination}, Price=${flight.price}, Leg=${flight.leg}")
+        }
+        logger.info("---- End of received fetchedFlights ----")
+
+        val departureDateParsed = convertToLocalDateSafe(dto.departureDate)
+                ?: throw IllegalArgumentException("Gidiş tarihi (departureDate) boş veya geçersiz formatta.")
+        val returnDateParsed = convertToLocalDateSafe(dto.returnDate)
+
+
+        var existingSearchFromDb = userFlightSearchRepository.findByUserAndOriginAndDestinationAndDepartureDateAndReturnDate(
+            user, dto.origin, dto.destination, departureDateParsed, returnDateParsed
+        )
+
+        val cheapestDepartureDto = fetchedFlights.filter { it.leg == FlightLegType.DEPARTURE || it.leg == FlightLegType.ONE_WAY }
+                                       .minByOrNull { it.price }
+        var cheapestReturnDto: FlightResponseDTO? = null
+        if (returnDateParsed != null) {
+            cheapestReturnDto = fetchedFlights.filter { it.leg == FlightLegType.RETURN }
+                                      .minByOrNull { it.price }
+    }
+
+        /* 
+
+        val cheapestFlightDto = fetchedFlights.minByOrNull { it.price }
+        if (cheapestFlightDto != null) {
+            logger.info("Cheapest flight selected by minByOrNull: Price=${cheapestFlightDto.price}, Origin=${cheapestFlightDto.origin}, Dest=${cheapestFlightDto.destination}, Leg=${cheapestFlightDto.leg}")
+        } else {
+            logger.info("No cheapest flight could be selected from fetchedFlights (list might be empty or prices are problematic).")
+        }
+        var message: String
+        var finalSearchEntity: UserFlightSearch // DTO oluşturmak için nihai entity
+
+        if (searchToProcess != null) { // Arama Zaten Var
+            logger.info("Search criteria already exists for user ${user.email} with ID ${searchToProcess.id}.")
+            message = "Search criteria already existed with ID ${searchToProcess.id}." // İngilizce'ye çevrildi
+            if (searchToProcess.flights.isEmpty() && cheapestFlightDto != null) {
+                val flightEntity = mapFlightDtoToEntity(cheapestFlightDto, searchToProcess)
+                searchToProcess.flights.add(flightEntity)
+                userFlightSearchRepository.save(searchToProcess)
+                logger.info("Added cheapest flight to existing search ID ${searchToProcess.id}.")
+                message += " Cheapest flight has been added to it."
+            } else {
+                logger.info("Existing search ID ${searchToProcess.id} already has flights or no new flights to add. No flight saving action taken for flights.")
+                // message += " No new flights added to it." // Bu mesaj belki gereksiz olabilir
+            }
+            finalSearchEntity = searchToProcess
+        } else { // Yeni Arama Kaydı
+            val newSearchEntity = UserFlightSearch(
+                user = user,
+                origin = dto.origin,
+                destination = dto.destination,
+                departureDate = departureDateParsed,
+                returnDate = returnDateParsed,
+                maxPrice = dto.maxPrice,
+                adults = dto.adults,
+                preferredAirlines = dto.preferredAirlines?.joinToString(","),
+                createdAt = LocalDateTime.now(),
+                flights = mutableListOf()
+            )
+            finalSearchEntity = userFlightSearchRepository.save(newSearchEntity) // Önce ID alması için kaydet
+            logger.info("New search criteria saved for user ${user.email} with ID ${finalSearchEntity.id}")
+            message = "New search criteria saved with ID ${finalSearchEntity.id}."
+
+            if (cheapestFlightDto != null) {
+                val flightEntity = mapFlightDtoToEntity(cheapestFlightDto, finalSearchEntity)
+                finalSearchEntity.flights.add(flightEntity) // Listeye ekle
+                userFlightSearchRepository.save(finalSearchEntity) // Uçuşla birlikte tekrar kaydet
+                logger.info("Cheapest flight (Price: ${flightEntity.price}) saved for new search ID ${finalSearchEntity.id}")
+                message += " Cheapest flight also saved."
+            } else {
+                logger.info("No flights in the fetched results to save for new search ID ${finalSearchEntity.id}")
+                // message += " No flights were available to save with this new search."; // Bu mesaj da opsiyonel
+            }
+        }
+        */
+    var message: String
+    val finalSearchEntity: UserFlightSearch // Kaydedilecek uçuşları tutacak liste
+
+    if (existingSearchFromDb != null) { // Arama Zaten Var
+        finalSearchEntity = existingSearchFromDb // finalSearchEntity'i ata
+        logger.info("Search criteria already exists for user ${user.email} with ID ${finalSearchEntity.id}.")
+        message = "Search criteria already existed with ID ${finalSearchEntity.id}."
+
+        // Mevcut aramanın uçuşlarını güncelle/ekle (sadece en ucuzları)
+        var flightsUpdated = false
+        val newFlightsForExistingSearch = mutableListOf<Flight>()
+
+        cheapestDepartureDto?.let { newFlightsForExistingSearch.add(mapFlightDtoToEntity(it, finalSearchEntity)) }
+        cheapestReturnDto?.let { newFlightsForExistingSearch.add(mapFlightDtoToEntity(it, finalSearchEntity)) }
+
+        if (newFlightsForExistingSearch.isNotEmpty()) {
+            // Eski uçuşları temizleyip yenilerini eklemek daha basit olabilir
+            // veya mevcutları güncelleyip/ekleyip/silmek daha karmaşık bir mantık gerektirir.
+            // Şimdilik, en güncel en ucuzları tutmak için eskileri temizleyip yenileri ekleyelim.
+            finalSearchEntity.flights.clear()
+            finalSearchEntity.flights.addAll(newFlightsForExistingSearch)
+            userFlightSearchRepository.save(finalSearchEntity) // Değişikliği kaydet
+            logger.info("Updated/added ${newFlightsForExistingSearch.size} cheapest flight(s) to existing search ID ${finalSearchEntity.id}.")
+            message += " Cheapest flight(s) have been updated/added."
+            flightsUpdated = true
+        } else {
+            logger.info("No new cheapest flights to add/update for existing search ID ${finalSearchEntity.id}.")
+        }
+
+    } else { // Yeni Arama Kaydı
+        val newSearchEntity = UserFlightSearch(
+            user = user,
+            origin = dto.origin,
+            destination = dto.destination,
+            departureDate = departureDateParsed,
+            returnDate = returnDateParsed,
+            maxPrice = dto.maxPrice,
+            adults = dto.adults,
+            preferredAirlines = dto.preferredAirlines?.joinToString(","),
+            createdAt = LocalDateTime.now(),
+            flights = mutableListOf()
+        )
+        // Önce arama kriterlerini kaydet (flights listesi boş)
+        val savedBaseSearch = userFlightSearchRepository.save(newSearchEntity)
+        finalSearchEntity = savedBaseSearch // finalSearchEntity'i ata
+
+        logger.info("New search criteria saved for user ${user.email} with ID ${finalSearchEntity.id}")
+        message = "New search criteria saved with ID ${finalSearchEntity.id}."
+
+        val initialFlightsToAdd = mutableListOf<Flight>()
+        cheapestDepartureDto?.let { initialFlightsToAdd.add(mapFlightDtoToEntity(it, finalSearchEntity)) }
+        cheapestReturnDto?.let { initialFlightsToAdd.add(mapFlightDtoToEntity(it, finalSearchEntity)) }
+
+        if (initialFlightsToAdd.isNotEmpty()) {
+            finalSearchEntity.flights.addAll(initialFlightsToAdd)
+            userFlightSearchRepository.save(finalSearchEntity) // Uçuşlarla birlikte tekrar kaydet
+            logger.info("Saved ${initialFlightsToAdd.size} cheapest flight(s) for new search ID ${finalSearchEntity.id}")
+            message += " Cheapest flight(s) also saved."
+        } else {
+            logger.info("No flights in the fetched results to save for new search ID ${finalSearchEntity.id}")
+        }
+    }
+        
+        return SimpleSavedSearchResponseDTO(
+            searchId = finalSearchEntity.id,
+            message = message,
+            origin = finalSearchEntity.origin,
+            destination = finalSearchEntity.destination,
+            departureDate = finalSearchEntity.departureDate.format(dateFormatter), // Sınıf içindeki dateFormatter (YYYY-MM-DD)
+            returnDate = finalSearchEntity.returnDate?.format(dateFormatter),
+            adults = finalSearchEntity.adults
+        )
     }
     
 

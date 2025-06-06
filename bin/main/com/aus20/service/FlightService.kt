@@ -34,6 +34,16 @@ class FlightService(
         if (dateString.isNullOrBlank()) {
             return null
         }
+        // 1. Adım: Zaten "yyyy-MM-dd" formatında mı diye kontrol et
+        try {
+            LocalDate.parse(dateString, amadeusDateFormatter) // Sadece parse etmeyi dene
+            // Eğer buraya kadar hata almadan geldiyse, format zaten doğru demektir.
+            // logger.debug("Date '$dateString' is already in yyyy-MM-dd format.")
+            return dateString // Olduğu gibi döndür
+        } catch (e: DateTimeParseException) {
+            // Format "yyyy-MM-dd" değil, diğer formatı denemeye devam et.
+            // logger.debug("Date '$dateString' is not in yyyy-MM-dd format, trying 'MMM d, uuuu'.")
+        }
         return try {
             val parsedDate = LocalDate.parse(dateString, inputDateFormatter)
             parsedDate.format(amadeusDateFormatter)
@@ -110,46 +120,7 @@ class FlightService(
         }
 
         val isRoundTripSearch = convertedReturnDate != null
-        // Gidiş ayağı için legType belirle (tek yön ise ONE_WAY, gidiş-dönüş ise DEPARTURE)
-
-        /* 
-        val departureLegType = if (isRoundTripSearch) {
-            FlightLegType.DEPARTURE
-        } else {
-            FlightLegType.ONE_WAY
-        }
-
-        val departureFlights = fetchFlights(
-            origin = request.origin,
-            destination = request.destination,
-            date = request.departureDate,
-            adults = request.adults,
-            preferredAirlines = request.preferredAirlines,
-            maxPrice = request.maxPrice,
-            headers = headers,
-            legType = departureLegType
-        )
-
-        if (isRoundTripSearch && request.returnDate != null) {
-            val returnFlights = fetchFlights(
-                origin = request.destination,
-                destination = request.origin,
-                date = request.returnDate,
-                adults = request.adults,
-                preferredAirlines = request.preferredAirlines,
-                maxPrice = request.maxPrice,
-                headers = headers,
-                legType = FlightLegType.RETURN
-            )
-            return RoundTripFlightResponseDTO(
-                departureFlight = departureFlights,
-                returnFlight = returnFlights
-            )
-        }
-
-        return departureFlights
-    }
-    */
+        
         if (!isRoundTripSearch) {
             // Tek Yön Arama
             return fetchFlights(
@@ -166,8 +137,7 @@ class FlightService(
                 legType = FlightLegType.ONE_WAY,
                 //maxResults = MAX_FLIGHT_OFFERS_ONE_WAY // Tek yön uçuşlar için maksimum sonuç sayısı
             ).sortedBy { it.price } // Tek yön uçuşları da fiyata göre sıralayalım
-        } else 
-        {
+        } else {
             // Gidiş-Dönüş Arama
 
             // Gidiş uçuşlarını al ve fiyata göre sırala
@@ -201,7 +171,7 @@ class FlightService(
             val depIterator = departureFlights.iterator()
             val retIterator = returnFlights.iterator()
 
-            // En ucuz gidiş, en ucuz dönüş şeklinde sırayla ekle
+            //En ucuz gidiş, en ucuz dönüş şeklinde sırayla ekle
             while (depIterator.hasNext() || retIterator.hasNext()) {
                 if (depIterator.hasNext()) {
                     mergedList.add(depIterator.next())

@@ -11,23 +11,58 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal
 import com.aus20.dto.response.SavedUserSearchResponseDTO
 import com.aus20.dto.response.UserSearchDetailDTO
 import com.aus20.dto.response.SimpleSavedSearchResponseDTO
+import com.aus20.service.FlightDataProvider // <<<--- YENİ IMPORT
+import org.slf4j.LoggerFactory
+import com.aus20.dto.response.FlightResponseDTO
+
 
 @RestController
 @RequestMapping("/api/user-searches")
 class UserFlightSearchController(
-    private val userFlightSearchService: UserFlightSearchService
+    private val userFlightSearchService: UserFlightSearchService,
+    private val flightDataProvider: FlightDataProvider
 ) {
-    /*  
+    private val logger = LoggerFactory.getLogger(UserFlightSearchController::class.java)
+      
     @PostMapping
     fun saveUserSearch(
         @RequestBody request: FlightSearchRequestDTO,
         @CurrentUser user: User
     ): ResponseEntity<SimpleSavedSearchResponseDTO> { // <<<--- DÖNÜŞ TİPİ DEĞİŞTİ
-        val savedSearchDetails = userFlightSearchService.saveSearchWithTopFlights(request, user)
-        return ResponseEntity.ok(savedSearchDetails) // Direkt servisten gelen DTO'yu döndür
-    }
-    */
+        logger.info("User ${user.email} is explicitly saving a search with DTO: $request")
+        try {
+            // 1. Bu arama için güncel uçuşları FlightDataProvider'dan çek
+            val currentFetchedFlights: List<FlightResponseDTO> = flightDataProvider.searchFlightsWithFilters(request)
+            logger.info("---- UserFlightSearchController: currentFetchedFlights for saving (Size: ${currentFetchedFlights.size}) ----")
+            currentFetchedFlights.forEachIndexed { index, flight ->
+                logger.info("SavingContext Flight ${index + 1}: Origin=${flight.origin}, Dest=${flight.destination}, Price=${flight.price}, Leg=${flight.leg}")
+            }
+            logger.info("---- End of currentFetchedFlights for saving ----")
 
+            // 2. Arama kriterlerini ve (varsa) en ucuz uçuşu kaydetmek/güncellemek için servisi çağır.
+            // Bu metot artık SimpleSavedSearchResponseDTO döndürüyor.
+            val savedSearchResponseDto = userFlightSearchService.saveSearchAndInitialFlight(request, user, currentFetchedFlights)
+            
+            return ResponseEntity.ok(savedSearchResponseDto)
+
+        } catch (e: IllegalArgumentException) {
+            // Genellikle tarih formatı hatası veya UserFlightSearchService'ten fırlatılan diğer beklenen hatalar
+            logger.warn("User ${user.email}: Failed to save search (IllegalArgumentException): ${e.message} for DTO: $request")
+            // GlobalExceptionHandler bu hatayı yakalayıp uygun bir HTTP 400 yanıtı oluşturacaktır.
+            throw e 
+        } catch (e: Exception) {
+            logger.error("User ${user.email}: Unexpected error while saving search for DTO: $request", e)
+            // Genel bir hata DTO'su veya sadece HTTP 500 durumu dönülebilir.
+            // İsterseniz burada da SimpleSavedSearchResponseDTO içinde bir hata mesajı dönebilirsiniz.
+            // Örneğin:
+            // val errorResponse = SimpleSavedSearchResponseDTO(searchId = -1, message = "Error saving search: ${e.localizedMessage}", ...)
+            // return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse)
+            return ResponseEntity.internalServerError().build() 
+        }
+    }
+    
+    
+    /* 
     @GetMapping
     fun getUserSearches(
         @CurrentUser user: User
@@ -35,6 +70,7 @@ class UserFlightSearchController(
         val searches = userFlightSearchService.getUserSearches(user)
         return ResponseEntity.ok(searches) // Servisten gelen DTO listesini direkt döndür
     }
+    */
     /* 
     @PutMapping("/{searchId}")
     fun updateFlightSearch(
